@@ -1,0 +1,648 @@
+---
+title: "Data Summary"
+author: "Grace"
+date: "2026-02-15"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary Tables
+
+This filters the AER 2025 fisheries data to create summary tables of fleet clusters per species/stock.
+
+## Libraries
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readxl)
+library(writexl)
+```
+
+## Data
+
+### 1. AER 2025 Data
+
+```{r data upload}
+data_AER <- read.csv("STECF_25 07_Landings_2018-2023.csv")
+head(data_AER)
+```
+
+-   Set missing data to NA
+
+```{r}
+data_AER <- data_AER %>%
+  mutate(across(where(is.character), ~ na_if(trimws(.), "")))  # "" or "   " -> NA
+
+na_counts <- colSums(is.na(data_AER))
+na_counts
+```
+
+-   Information about data
+
+-   Data summary
+
+```{r}
+summary(data_AER)
+```
+
+### 2. EU TAC Data
+
+```{r}
+data_TAC <- read_excel("EU TACs.xlsx", sheet = "Sheet1")
+head(data_TAC)
+```
+
+## Atlantic Mackerel (*Scomber scombrus*)
+
+### 1. Filter data
+
+-   Removing the "Value of Landings" variable to avoid row duplication
+-   MAC (Atlantic Mackerel species code)
+-   Only NAO, removing MBS (Med and Black Sea)
+-   Only one year, because some segments are present in one year and not the others
+-   **Grouping clusters by supra_reg, sub_reg, fishing_tech, and vessel_length**
+
+NOTES: Atlantic Mackerel, *Scomber scombrus*, only has one EU-wide stock. [ICES Stock](https://stockdatabase.ices.dk/ViewStock.aspx?key=4162){.uri}
+
+```{r MAC}
+mac_clusters <- data_AER %>%
+  filter(variable_name == "Live weight of landings",
+         species_code == "MAC",
+         supra_reg == "NAO",
+         year == 2023) %>%
+  group_by(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) %>%
+  summarise(
+    n_rows = n(),
+    live_weight_sum = sum(value, na.rm = TRUE),
+    .groups = "drop") %>%
+  arrange(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) 
+
+mac_clusters
+```
+
+### 2. Cluster metrics
+
+-   Total number of clusters
+
+```{r}
+n_mac_clusters <- nrow(mac_clusters)
+n_mac_clusters
+```
+
+-   The number of clusters per year varies
+
+```{r}
+mac_clusters_per_year <- data_AER %>%
+  filter(species_code == "MAC",
+         supra_reg == "NAO",
+         variable_name == "Live weight of landings") %>%
+  group_by(year) %>%
+  summarise(
+    n_clusters = n_distinct(country_name, supra_reg, sub_reg, fishing_tech, vessel_length),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+mac_clusters_per_year
+```
+
+-   Count the number of countries with representative clusters
+
+```{r}
+mac_clusters %>%
+  distinct(country_name)
+```
+
+-   Count the number of fishing gears used to exploit the stock
+
+```{r}
+mac_clusters %>%
+  distinct(fishing_tech)
+```
+
+-   Count the number of subregions where the stock is exploited
+
+```{r}
+mac_clusters %>%
+  distinct(sub_reg)
+
+```
+
+#### Total landings per country
+
+-   in metric tons
+
+```{r}
+mac_country_totals <- mac_clusters %>%
+  group_by(country_name) %>%
+  summarise(
+    live_weight_country_total = round(sum(live_weight_sum, na.rm = TRUE)*0.001), #convert to metric tons / tonnes (same as TAC Regulation unit)
+    .groups = "drop"
+  ) %>%
+  arrange(desc(live_weight_country_total))
+
+mac_country_totals
+```
+
+### 3. Cluster reduction
+
+#### Total TAC per country
+
+-   Top 5 countries are: Spain, Ireland, Denmark, Netherlands, Germany
+
+```{r}
+mac_TAC_totals <- data_TAC %>%
+  filter (species_code == "MAC")  %>%
+  group_by(country_name) %>%
+  summarise(
+    TAC_country_total = round(sum(quota_tonnes, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(TAC_country_total))
+
+mac_TAC_totals
+```
+
+-   Filter the top 5 countries list
+
+```{r}
+top5_mac <- mac_TAC_totals %>%
+  slice_max(TAC_country_total, n = 5, with_ties = FALSE) %>%  # pick top 5
+  select(country_name)
+top5_mac
+```
+
+#### Clusters of Top 5 countries
+
+-   With subregion
+
+```{r}
+mac_clusters_top5 <- mac_clusters %>%
+  semi_join(top5_mac, by = "country_name") %>% # filter to top 5
+  arrange(country_name, supra_reg, sub_reg, fishing_tech, vessel_length)
+mac_clusters_top5
+```
+
+-   Without subregion
+
+```{r}
+mac_clusters_top5 %>%
+  group_by(country_name, supra_reg, fishing_tech, vessel_length) %>%  # <- sub_reg removed
+  summarise(
+    n_rows = sum(n_rows),
+    live_weight_sum = sum(live_weight_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(country_name, supra_reg,fishing_tech, vessel_length)
+mac_clusters_top5
+```
+
+#### Merging subregions
+
+-   6, 7, 8a, 8b, 8d and 8e; United Kingdom and international waters of 5b; international waters of 2a, 12 and 14 (MAC/2CX14-)
+
+```{r}
+mac_clusters %>%
+filter(str_detect(sub_reg, "^27\\.(5|6|7|8)")) %>%
+  group_by(country_name, supra_reg, fishing_tech, vessel_length) %>%
+  summarise(
+    n_rows = n(),
+    live_weight_sum = sum(live_weight_sum, na.rm = TRUE), 
+    .groups = "drop"
+  ) %>%
+  arrange(country_name, supra_reg, fishing_tech, vessel_length)
+```
+
+-   8c, 9 and 10; Union waters of CECAF 34.1.1 (MAC/8C3411)
+
+```{r}
+mac_clusters %>%
+filter(str_detect(sub_reg, "^27\\.(8c|9|10)")|
+       str_detect(sub_reg, "^34\\.(1.1)")) %>%
+  group_by(country_name, supra_reg, fishing_tech, vessel_length) %>%
+  summarise(
+    n_rows = n(),
+    live_weight_sum = sum(live_weight_sum, na.rm = TRUE), 
+    .groups = "drop"
+  ) %>%
+  arrange(country_name, supra_reg, fishing_tech, vessel_length)
+```
+
+## European Hake (*Merluccius merluccius*)
+
+### 1. Filter data
+
+Same filtering as the first one - Atlantic Mackerel
+
+```{r HKE}
+
+hke_clusters <- data_AER %>%
+  filter(variable_name == "Live weight of landings",
+         species_code == "HKE",
+         supra_reg == "NAO",
+         year == 2023) %>%
+  group_by(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) %>%
+  summarise(
+    n_rows = n(),
+    live_weight_sum = sum(value, na.rm = TRUE),
+    .groups = "drop") %>%
+  arrange(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) 
+
+hke_clusters
+```
+
+### 2. Cluster metrics
+
+-   Total number of clusters
+
+```{r}
+nrow(hke_clusters)
+```
+
+-   The number of clusters per year varies
+
+```{r}
+hke_clusters_per_year <- data_AER %>%
+  filter(species_code == "HKE",
+         supra_reg == "NAO",
+         variable_name == "Live weight of landings") %>%
+  group_by(year) %>%
+  summarise(
+    n_clusters = n_distinct(country_name, supra_reg, sub_reg, fishing_tech, vessel_length),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+hke_clusters_per_year
+```
+
+-   Count the number of countries with representative clusters
+
+```{r}
+hke_clusters %>%
+  distinct(country_name)
+```
+
+-   Count the number of fishing gears used to exploit the stock
+
+```{r}
+hke_clusters %>%
+  distinct(fishing_tech)
+```
+
+-   Count the number of subregions where the stock is exploited
+
+```{r}
+hke_clusters %>%
+  distinct(sub_reg)
+
+```
+
+#### Total landings per country
+
+-   in metric tons
+
+```{r}
+hke_country_totals <- hke_clusters %>%
+  group_by(country_name) %>%
+  summarise(
+    live_weight_country_total = round(sum(live_weight_sum, na.rm = TRUE)*0.001), #convert to metric tons / tonnes (same as TAC Regulation unit)
+    .groups = "drop"
+  ) %>%
+  arrange(desc(live_weight_country_total))
+
+hke_country_totals
+```
+
+### 3. Cluster reduction
+
+#### Total TAC per country
+
+-   Top 5 countries are: France, Spain, Portugal, Denmark, Ireland
+
+```{r}
+hke_TAC_totals <- data_TAC %>%
+  filter (species_code == "HKE")  %>%
+  group_by(country_name) %>%
+  summarise(
+    TAC_country_total = round(sum(quota_tonnes, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(TAC_country_total))
+
+hke_TAC_totals
+```
+
+-   Filter the top 5 countries list
+
+```{r}
+top5_hke <- hke_TAC_totals %>%
+  slice_max(TAC_country_total, n = 5, with_ties = FALSE) %>%  # pick top 5
+  select(country_name)
+top5_hke
+```
+
+#### Clusters of Top 5 countries
+
+-   With subregion
+
+```{r}
+hke_clusters_top5 <- hke_clusters %>%
+  semi_join(top5_hke, by = "country_name") %>% # filter to top 5
+  arrange(country_name, supra_reg, sub_reg, fishing_tech, vessel_length)
+hke_clusters_top5
+```
+
+-   Without subregion
+
+```{r}
+hke_clusters_top5 %>%
+  group_by(country_name, supra_reg, fishing_tech, vessel_length) %>%  # <- sub_reg removed
+  summarise(
+    n_rows = sum(n_rows),
+    live_weight_sum = sum(live_weight_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(country_name, supra_reg,fishing_tech, vessel_length)
+hke_clusters_top5
+```
+
+## Horse Mackerel (*Trachurus trachurus*)
+
+### 1. Filter data
+
+NOTE: in the AER 2025 Data, JAX=Jack and Horse Mackerel, but not including CJM = Chilean jack mackerel, this is also separate in the TAC Reg 2025/202,].
+
+```{r JAX}
+
+jax_clusters <- data_AER %>%
+  filter(variable_name == "Live weight of landings",
+         species_code == "JAX",
+         supra_reg == "NAO",
+         year == 2023) %>%
+  group_by(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) %>%
+  summarise(
+    n_rows = n(),
+    live_weight_sum = sum(value, na.rm = TRUE),
+    .groups = "drop") %>%
+  arrange(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) 
+
+jax_clusters
+```
+
+### 2. Cluster metrics
+
+-   Total number of clusters
+
+```{r}
+nrow(jax_clusters)
+```
+
+-   The number of clusters per year varies
+
+```{r}
+jax_clusters_per_year <- data_AER %>%
+  filter(species_code == "JAX",
+         supra_reg == "NAO",
+         variable_name == "Live weight of landings") %>%
+  group_by(year) %>%
+  summarise(
+    n_clusters = n_distinct(country_name, supra_reg, sub_reg, fishing_tech, vessel_length),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+jax_clusters_per_year
+```
+
+-   Count the number of countries with representative clusters
+
+```{r}
+jax_clusters %>%
+  distinct(country_name)
+```
+
+-   Count the number of fishing gears used to exploit the stock
+
+```{r}
+jax_clusters %>%
+  distinct(fishing_tech)
+```
+
+-   Count the number of subregions where the stock is exploited
+
+```{r}
+jax_clusters %>%
+  distinct(sub_reg)
+
+```
+
+#### Total landings per country
+
+-   in metric tons
+
+```{r}
+jax_country_totals <- jax_clusters %>%
+  group_by(country_name) %>%
+  summarise(
+    live_weight_country_total = round(sum(live_weight_sum, na.rm = TRUE)*0.001), #convert to metric tons / tonnes (same as TAC Regulation unit)
+    .groups = "drop"
+  ) %>%
+  arrange(desc(live_weight_country_total))
+
+jax_country_totals
+```
+
+### 3. Cluster reduction
+
+#### Total TAC per country
+
+-   Top 5 countries are: Portugal, Spain, Netherlands, Ireland, Denmark
+
+```{r}
+jax_TAC_totals <- data_TAC %>%
+  filter (species_code == "JAX")  %>%
+  group_by(country_name) %>%
+  summarise(
+    TAC_country_total = round(sum(quota_tonnes, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(TAC_country_total))
+
+jax_TAC_totals
+```
+
+-   Filter the top 5 countries list
+
+```{r}
+top5_jax <- jax_TAC_totals %>%
+  slice_max(TAC_country_total, n = 5, with_ties = FALSE) %>%  # pick top 5
+  select(country_name)
+top5_jax
+```
+
+#### Clusters of Top 5 countries
+
+-   With subregion
+
+```{r}
+jax_clusters_top5 <- jax_clusters %>%
+  semi_join(top5_jax, by = "country_name") %>% # filter to top 5
+  arrange(country_name, supra_reg, sub_reg, fishing_tech, vessel_length)
+hke_clusters_top5
+```
+
+-   Without subregion
+
+```{r}
+jax_clusters_top5 >%
+  group_by(country_name, supra_reg, fishing_tech, vessel_length) %>%  # <- sub_reg removed
+  summarise(
+    n_rows = sum(n_rows),
+    live_weight_sum = sum(live_weight_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(country_name, supra_reg,fishing_tech, vessel_length)
+jax_clusters_top5
+```
+
+## Albacore (*Thunnus alalunga*)
+
+### 1. Filter data
+
+Same filtering as the first one - Atlantic Mackerel
+
+```{r ALB}
+
+alb_clusters <- data_AER %>%
+  filter(variable_name == "Live weight of landings",
+         species_code == "ALB",
+         supra_reg == "NAO",
+         year == 2023) %>%
+  group_by(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) %>%
+  summarise(
+    n_rows = n(),
+    live_weight_sum = sum(value, na.rm = TRUE),
+    .groups = "drop") %>%
+  arrange(country_name, supra_reg, sub_reg, fishing_tech, vessel_length) 
+
+alb_clusters
+```
+
+### 2. Cluster metrics
+
+-   Total number of clusters
+
+```{r}
+nrow(alb_clusters)
+```
+
+-   The number of clusters per year varies
+
+```{r}
+alb_clusters_per_year <- data_AER %>%
+  filter(species_code == "ALB",
+         supra_reg == "NAO",
+         variable_name == "Live weight of landings") %>%
+  group_by(year) %>%
+  summarise(
+    n_clusters = n_distinct(country_name, supra_reg, sub_reg, fishing_tech, vessel_length),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+alb_clusters_per_year
+```
+
+-   Count the number of countries with representative clusters
+
+```{r}
+alb_clusters %>%
+  distinct(country_name)
+```
+
+-   Count the number of fishing gears used to exploit the stock
+
+```{r}
+alb_clusters %>%
+  distinct(fishing_tech)
+```
+
+-   Count the number of subregions where the stock is exploited
+
+```{r}
+alb_clusters %>%
+  distinct(sub_reg)
+
+```
+
+#### Total landings per country
+
+-   in metric tons
+
+```{r}
+alb_country_totals <- alb_clusters %>%
+  group_by(country_name) %>%
+  summarise(
+    live_weight_country_total = round(sum(live_weight_sum, na.rm = TRUE)*0.001), #convert to metric tons / tonnes (same as TAC Regulation unit)
+    .groups = "drop"
+  ) %>%
+  arrange(desc(live_weight_country_total))
+
+alb_country_totals
+```
+
+### 3. Cluster reduction
+
+only 4 countries
+
+-   Without subregion
+
+```{r}
+alb_clusters %>%
+  group_by(country_name, supra_reg, fishing_tech, vessel_length) %>%  # <- sub_reg removed
+  summarise(
+    n_rows = sum(n_rows),
+    live_weight_sum = sum(live_weight_sum, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(country_name, supra_reg,fishing_tech, vessel_length)
+alb_clusters
+```
+
+## Combined database
+```{r}
+# 1) Species metadata
+species_meta <- tibble::tribble(
+  ~species_code, ~common_name,         ~scientific_name,
+  "MAC",         "Atlantic Mackerel",  "Scomber scombrus",
+  "HKE",         "European Hake",      "Merluccius merluccius",
+  "JAX",         "Horse Mackerel",     "Trachurus trachurus",
+  "ALB",         "Albacore",           "Thunnus alalunga"
+)
+
+# 2) Combine all clusters + add species info in one step
+all_clusters <- bind_rows(
+  mac_clusters_top5 %>% mutate(species_code = "MAC"),
+  hke_clusters_top5 %>% mutate(species_code = "HKE"),
+  jax_clusters_top5 %>% mutate(species_code = "JAX"),
+  alb_clusters %>% mutate(species_code = "ALB")
+) %>%
+  left_join(species_meta, by = "species_code") %>%
+  select(species_code, common_name, scientific_name, everything())
+
+all_clusters
+```
+
+```{r}
+# 3) Export single sheet
+write_xlsx(all_clusters, "Fleet_Clusters_All_Species.xlsx")
+```
+
+
