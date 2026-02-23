@@ -3,10 +3,10 @@ title: "Data Summary"
 author: "Grace"
 date: "2026-02-15"
 output:
-  html_document: default
-  pdf_document: default
   md_document:
     variant: gfm
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
