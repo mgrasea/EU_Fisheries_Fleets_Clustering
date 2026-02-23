@@ -5,6 +5,8 @@ date: "2026-02-15"
 output:
   html_document: default
   pdf_document: default
+  md_document:
+    variant: gfm
 ---
 
 ```{r setup, include=FALSE}
@@ -29,7 +31,7 @@ library(writexl)
 ### 1. AER 2025 Data
 
 ```{r data upload}
-data_AER <- read.csv("STECF_25 07_Landings_2018-2023.csv")
+data_AER <- read.csv("C:/MER2030/Sem 4 AZTI Thesis/Fisheries Data Analysis/STECF_25 07_Landings_2018-2023.csv")
 head(data_AER)
 ```
 
@@ -54,7 +56,7 @@ summary(data_AER)
 ### 2. EU TAC Data
 
 ```{r}
-data_TAC <- read_excel("EU TACs.xlsx", sheet = "Sheet1")
+data_TAC <- read_excel("C:/MER2030/Sem 4 AZTI Thesis/Fisheries Data Analysis/EU TACs.xlsx", sheet = "Sheet1")
 head(data_TAC)
 ```
 
@@ -501,7 +503,7 @@ hke_clusters_top5
 -   Without subregion
 
 ```{r}
-jax_clusters_top5 >%
+jax_clusters_top5 %>%
   group_by(country_name, supra_reg, fishing_tech, vessel_length) %>%  # <- sub_reg removed
   summarise(
     n_rows = sum(n_rows),
