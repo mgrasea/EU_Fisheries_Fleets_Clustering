@@ -647,4 +647,52 @@ all_clusters
 write_xlsx(all_clusters, "Fleet_Clusters_All_Species.xlsx")
 ```
 
+## Percentile reduction
+
+```{r}
+keep_until_share_by_species <- function(df, target = 0.95) {
+  df %>%
+    arrange(desc(live_weight_sum)) %>%
+    mutate(
+      cum_live = cumsum(live_weight_sum),
+      total_live = sum(live_weight_sum, na.rm = TRUE),
+      cum_share = cum_live / total_live
+    ) %>%
+    filter(cum_share <= target) %>%
+    select(-cum_live, -total_live, -cum_share)
+}
+```
+
+```{r}
+clusters_95 <- all_clusters %>%
+  group_by(species_code) %>%
+  group_modify(~ keep_until_share_by_species(.x, target = 0.95)) %>%
+  ungroup()
+clusters_95
+
+```
+```{r}
+write_xlsx(clusters_95, "Fleet_Clusters_95_All_Species.xlsx")
+```
+
+
+
+## Reduction of clusters contributing <0.05% 
+* these can be regarded as negligible
+```{r}
+clusters_reduced_0.05pct <- all_clusters %>%
+  group_by(species_code) %>%
+  mutate(
+    total_live = sum(live_weight_sum, na.rm = TRUE),
+    share = live_weight_sum / total_live,
+    keep = share >= 0.0005  # 0.05% minimum share
+  ) %>%
+  filter(keep) %>%
+  select(-total_live, -keep)
+clusters_reduced_0.05pct
+```
+
+```{r}
+write_xlsx(clusters_reduced_0.05pct, "Fleet_Clusters_0.05pct_All_Species.xlsx")
+```
 
